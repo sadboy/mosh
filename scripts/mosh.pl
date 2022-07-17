@@ -62,7 +62,7 @@ my $have_ipv6 = eval {
 $|=1;
 
 my $client = 'mosh-client';
-my $server = 'mosh-server';
+my $server = '/home/linb/bin/mosh/bin/mosh-server';
 
 my $predict = undef;
 
@@ -70,7 +70,7 @@ my $overwrite = 0;
 
 my $bind_ip = undef;
 
-my $use_remote_ip = 'proxy';
+my $use_remote_ip = 'remote';
 
 my $family = 'prefer-inet';
 my $port_request = undef;
@@ -350,10 +350,12 @@ if ( $use_remote_ip eq 'local' ) {
   $userhost = "$user$ip";
 }
 
-my $pid = open(my $pipe, "-|");
-die "$0: fork: $!\n" unless ( defined $pid );
-if ( $pid == 0 ) { # child
-  open(STDERR, ">&STDOUT") or die;
+# my $pid = open(my $pipe, "-|");
+# die "$0: fork: $!\n" unless ( defined $pid );
+
+# if ( $pid == 0 ) { # child
+sub do_child () {
+  # open(STDERR, ">&STDOUT") or die;
 
   my @sshopts = ( '-n' );
   if ($ssh_pty) {
@@ -374,29 +376,29 @@ if ( $pid == 0 ) { # child
       push @sshopts, '-6';
     }
   }
-  my @server = ( 'new' );
+  my @servercmd = ( 'new' );
 
-  push @server, ( '-c', $colors );
+  push @servercmd, ( '-c', $colors );
 
-  push @server, @bind_arguments;
+  push @servercmd, @bind_arguments;
 
   if ( defined $port_request ) {
-    push @server, ( '-p', $port_request );
+    push @servercmd, ( '-p', $port_request );
   }
 
   for ( &locale_vars ) {
-    push @server, ( '-l', $_ );
+    push @servercmd, ( '-l', $_ );
   }
 
   if ( scalar @command > 0 ) {
-    push @server, '--', @command;
+    push @servercmd, '--', @command;
   }
 
   if ( defined( $localhost )) {
     delete $ENV{ 'SSH_CONNECTION' };
     chdir; # $HOME
     print "MOSH IP ${userhost}\n";
-    exec( "$server " . shell_quote( @server ) );
+    system( $server, @servercmd );
     die "Cannot exec $server: $!\n";
   }
   if ( $use_remote_ip eq 'proxy' ) {
@@ -404,14 +406,25 @@ if ( $pid == 0 ) { # child
     # proxy to break mysteriously.
     $ENV{ 'SHELL' } = '/bin/sh';
     my $quoted_proxy_command = shell_quote( $0, "--family=$family" );
-    push @sshopts, ( '-S', 'none', '-o', "ProxyCommand=$quoted_proxy_command --fake-proxy -- %h %p" );
+    push @sshopts, ( '-S', 'none', '-o', "ProxyCommand=\"$quoted_proxy_command --fake-proxy -- %h %p\"" );
   }
-  my @exec_argv = ( @ssh, @sshopts, $userhost, '--', $ssh_connection . "$server " . shell_quote( @server ) );
-  exec @exec_argv;
-  die "Cannot exec ssh: $!\n";
-} else { # parent
+  my @exec_argv = (
+      'c:/Windows/System32/OpenSSH/ssh.exe',
+      @sshopts, $userhost,
+      '--',
+      $ssh_connection . "$server " . shell_quote( @servercmd )
+      );
+  # for my $item (@exec_argv) {
+  #     print "$item ";
+  # }
+  my $pid = open(my $pipe, "-|", @exec_argv) || die "Cannot exec ssh: $!\n";
+  return ($pid, $pipe);
+}
+
+sub do_parent () { # parent
   my ( $sship, $port, $key );
   my $bad_udp_port_warning = 0;
+  my ( $pid, $pipe ) = do_child();
   LINE: while ( <$pipe> ) {
     chomp;
     if ( m{^MOSH IP } ) {
@@ -536,3 +549,5 @@ sub resolvename {
   }
   return @res;
 }
+
+do_parent();
